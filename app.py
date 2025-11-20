@@ -1,3 +1,12 @@
+# Mapping for attack types
+ATTACK_TYPES = {
+    0: 'Normal',
+    1: 'DoS Attack',
+    2: 'Probe Attack',
+    3: 'R2L Attack',
+    4: 'U2R Attack'
+}
+
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 import pandas as pd
 import numpy as np
@@ -7,9 +16,53 @@ import hashlib
 from datetime import datetime
 import os
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_socketio import SocketIO, emit
+import threading
+import time
+import asyncio
+from live_packet_features import LivePacketFeatureExtractor, FEATURE_NAMES
+
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'
+socketio = SocketIO(app)
+
+# Live prediction background thread
+def live_prediction_stream():
+    # Fix for PyShark asyncio error in threads
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    extractor = LivePacketFeatureExtractor(interface='Wi-Fi')
+    try:
+        model = joblib.load('model.sav')
+        label_encoders = joblib.load('label_encoders.sav')
+    except Exception:
+        model = None
+        label_encoders = {}
+    while True:
+        features_list = extractor.capture_and_extract(packet_limit=1)
+        for features_dict in features_list:
+            processed_features = []
+            for name in FEATURE_NAMES:
+                value = features_dict[name]
+                if name in label_encoders:
+                    try:
+                        value = label_encoders[name].transform([value])[0]
+                    except Exception:
+                        value = 0
+                processed_features.append(float(value))
+            features = np.array(processed_features).reshape(1, -1)
+            if model:
+                prediction = model.predict(features)[0]
+                label = ATTACK_TYPES.get(int(prediction), str(prediction))
+                socketio.emit('live_prediction', {
+                    'prediction': label,
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                })
+        time.sleep(5)  # Adjust interval as needed
+
+# Start background thread for live predictions immediately after SocketIO init
+start_live_thread = threading.Thread(target=live_prediction_stream, daemon=True)
+start_live_thread.start()
 
 # Database setup
 def init_db():

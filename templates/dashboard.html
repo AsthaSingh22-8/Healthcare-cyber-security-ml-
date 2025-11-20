@@ -117,6 +117,22 @@
         </div>
     </div>
     
+    <!-- Live Prediction Stream -->
+    <div class="row">
+        <div class="col-12 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-broadcast-tower me-2"></i>Live Prediction Stream
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="live-prediction-list" class="mb-0"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Recent Activity & Threat Analysis -->
     <div class="row">
         <div class="col-lg-8 mb-4">
@@ -275,8 +291,27 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Live Prediction Stream Socket.IO
+    var socket = io();
+    var liveList = document.getElementById('live-prediction-list');
+    socket.on('live_prediction', function(data) {
+        var entry = document.createElement('div');
+        entry.className = 'alert alert-warning mb-2';
+        entry.innerHTML = `<strong>Prediction:</strong> ${data.prediction} <span class="text-muted ms-3"><i class="fas fa-clock me-1"></i>${data.timestamp}</span>`;
+        // Add new prediction at the top
+        if (liveList.firstChild) {
+            liveList.insertBefore(entry, liveList.firstChild);
+        } else {
+            liveList.appendChild(entry);
+        }
+        // Limit to last 10 entries
+        while (liveList.childElementCount > 10) {
+            liveList.removeChild(liveList.lastChild);
+        }
+    });
     // Threat Distribution Chart
     const ctx = document.getElementById('threatChart').getContext('2d');
     
