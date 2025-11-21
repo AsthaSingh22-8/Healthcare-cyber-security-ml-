@@ -1,0 +1,73 @@
+<!-- ATR Panel Partial -->
+<div class="container-fluid mt-4 fade-in">
+  <div class="row">
+    <div class="col-12 mb-4">
+      <div class="card card-atr h-100">
+        <div class="card-header d-flex justify-content-between align-items-center" style="background:transparent; border-bottom:1px solid rgba(255,255,255,0.08);">
+          <h5 class="mb-0"><i class="fas fa-shield-virus me-2"></i>Automated Threat Responses</h5>
+          <span class="badge badge-action">Engine Active</span>
+        </div>
+        <div class="card-body">
+          {% if recent_threats and recent_threats|length > 0 %}
+          <div class="table-responsive">
+            <table class="table table-threats table-borderless table-sm align-middle mb-2">
+              <thead style="background:rgba(255,255,255,0.07);">
+                <tr class="text-nowrap">
+                  <th class="text-white-50">Timestamp (UTC)</th>
+                  <th class="text-white-50">Threat</th>
+                  <th class="text-white-50">Confidence</th>
+                  <th class="text-white-50">Action</th>
+                  <th class="text-white-50">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for t in recent_threats %}
+                <tr>
+                  <td><small class="text-white-50">{{ t.timestamp }}</small></td>
+                  <td>
+                    <span class="badge {% if 'Normal' in t.threat_type %}bg-success{% else %}badge-critical{% endif %}">
+                      {{ t.threat_type }}
+                    </span>
+                  </td>
+                  <td style="min-width:120px;">
+                    <div class="confidence-mini mb-1" data-value="{{ '%.1f'|format(t.confidence) }}" role="progressbar" aria-valuenow="{{ '%.1f'|format(t.confidence) }}" aria-valuemin="0" aria-valuemax="100">
+                      <span class="bar-fill"></span>
+                    </div>
+                    <small class="text-white">{{ '%.1f'|format(t.confidence) }}%</small>
+                  </td>
+                  <td><span class="badge badge-action">{{ t.action }}</span></td>
+                  <td><small class="text-white-50">{{ t.reason }}</small></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <small class="text-white-50">Showing last {{ recent_threats|length }} evaluated threats (simulation only).</small>
+          {% else %}
+          <div class="text-center py-4">
+            <i class="fas fa-shield-alt text-white-50 mb-3" style="font-size:3rem;"></i>
+            <h6 class="text-white">No automated responses yet</h6>
+            <p class="text-white-50 mb-3">Run a threat scenario (e.g., DoS parameters) to populate this list.</p>
+            <a href="{{ url_for('predict') }}" class="btn btn-outline-light btn-sm">
+              <i class="fas fa-play me-1"></i>Generate Threat Scenario
+            </a>
+          </div>
+          {% endif %}
+        </div>
+        <div class="card-footer text-white-50 small" style="background:rgba(255,255,255,0.04);">
+          <i class="fas fa-info-circle me-1"></i> Actions are simulated for safety. Threshold: {{ threat_engine.confidence_threshold if threat_engine else 95 }}%
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+// Apply dynamic widths to confidence bars without inline style curly braces
+document.querySelectorAll('.confidence-mini').forEach(function(el){
+  var v = parseFloat(el.getAttribute('data-value'));
+  if(!isNaN(v)){
+    var fill = el.querySelector('.bar-fill');
+    if(fill){ fill.style.width = v + '%'; }
+  }
+});
+</script>

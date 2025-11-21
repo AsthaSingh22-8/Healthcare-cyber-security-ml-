@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Detection Results - Healthcare Cybersecurity{% endblock %}
+{% block title %}Scan Results - Healthcare Cybersecurity{% endblock %}
 
 {% block content %}
 <div class="container">
@@ -11,48 +11,74 @@
                         p-5 rounded-3 shadow-lg">
                 <div class="display-1 mb-3">
                     {% if prediction == 'Normal' %}
-                        <i class="fas fa-shield-alt text-white"></i>
+                        <i class="fas fa-check-circle text-white"></i>
                     {% else %}
                         <i class="fas fa-exclamation-triangle text-white"></i>
                     {% endif %}
                 </div>
                 <h1 class="display-4 fw-bold text-white mb-3">
                     {% if prediction == 'Normal' %}
-                        Network Traffic is NORMAL
+                        🛡️ All Clear - Network is Safe
                     {% else %}
-                        THREAT DETECTED: {{ prediction }}
+                        ⚠️ THREAT FOUND: {{ prediction }}
                     {% endif %}
                 </h1>
                 <p class="lead text-white mb-4">
                     {% if prediction == 'Normal' %}
-                        No malicious activity detected in the analyzed network traffic.
+                        Great news! Your network traffic looks normal and secure.
                     {% else %}
-                        Potential security threat identified. Immediate action recommended.
+                        We found a potential security threat. Don't worry - we can help fix it automatically!
                     {% endif %}
                 </p>
+                
+                <!-- Action Buttons -->
+                {% if prediction != 'Normal' %}
+                <div class="mb-4">
+                    <a href="{{ url_for('atr_dashboard') }}?resolve_threat={{ prediction|urlencode }}&confidence={{ confidence }}" 
+                       class="btn btn-warning btn-lg me-3 pulse-animation">
+                        <i class="fas fa-magic me-2"></i>
+                        🔧 Resolve This Threat Now
+                    </a>
+                    <button class="btn btn-outline-light btn-lg" onclick="showThreatInfo()">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Learn More
+                    </button>
+                </div>
+                {% else %}
+                <div class="mb-4">
+                    <a href="{{ url_for('predict') }}" class="btn btn-success btn-lg me-3">
+                        <i class="fas fa-search me-2"></i>
+                        Scan Another Network
+                    </a>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-lg">
+                        <i class="fas fa-home me-2"></i>
+                        Back to Dashboard
+                    </a>
+                </div>
+                {% endif %}
                 
                 <!-- Confidence Score -->
                 <div class="row justify-content-center">
                     <div class="col-md-6">
-                        <div class="bg-white bg-opacity-25 p-4 rounded-3">
+                        <div class="p-4 rounded-3" style="background: rgba(34,211,238,0.15); border: 2px solid rgba(34,211,238,0.3);">
                             <h5 class="text-white mb-3">
-                                <i class="fas fa-bullseye me-2"></i>Confidence Score
+                                <i class="fas fa-bullseye me-2"></i>How Sure Are We?
                             </h5>
-                            <div class="progress mb-2" style="height: 20px; background: rgba(255,255,255,0.3);">
-                                <div class="progress-bar bg-white" 
-                                     style="width: {{ confidence }}%;">
-                                    <strong class="text-dark">{{ confidence }}%</strong>
+                            <div class="progress mb-2" style="height: 25px; background: rgba(15,23,42,0.6);">
+                                <div class="progress-bar" 
+                                     style="width: {{ confidence }}%; background: linear-gradient(90deg, #22d3ee, #6366f1);">
+                                    <strong class="text-white fw-bold">{{ confidence }}%</strong>
                                 </div>
                             </div>
                             <small class="text-white">
                                 {% if confidence >= 90 %}
-                                    Very High Confidence
+                                    🎯 Very High Confidence - We're very sure about this result
                                 {% elif confidence >= 75 %}
-                                    High Confidence
+                                    ✅ High Confidence - This result is reliable
                                 {% elif confidence >= 60 %}
-                                    Moderate Confidence
+                                    👍 Good Confidence - Result is likely correct
                                 {% else %}
-                                    Low Confidence
+                                    ⚠️ Low Confidence - May need additional scanning
                                 {% endif %}
                             </small>
                         </div>
@@ -61,25 +87,107 @@
             </div>
         </div>
     </div>
-    
-    <!-- Action Buttons -->
-    <div class="row mb-4">
-        <div class="col-12 text-center">
-            <div class="btn-group" role="group">
-                <a href="{{ url_for('predict') }}" class="btn btn-primary btn-lg">
-                    <i class="fas fa-redo me-2"></i>Analyze Another
-                </a>
-                <a href="{{ url_for('dashboard') }}" class="btn btn-success btn-lg">
-                    <i class="fas fa-tachometer-alt me-2"></i>Dashboard
-                </a>
-                <button class="btn btn-info btn-lg" onclick="generateReport()">
-                    <i class="fas fa-download me-2"></i>Download Report
-                </button>
-                <button class="btn btn-warning btn-lg" data-bs-toggle="modal" data-bs-target="#detailsModal">
-                    <i class="fas fa-info-circle me-2"></i>View Details
-                </button>
+
+    {% if prediction != 'Normal' %}
+    <!-- Threat Information (Hidden by Default) -->
+    <div class="row mb-4" id="threatInfo" style="display: none;">
+        <div class="col-12">
+            <div class="card bg-dark border-warning">
+                <div class="card-header bg-warning">
+                    <h4 class="card-title mb-0 text-dark">
+                        <i class="fas fa-info-circle me-2"></i>
+                        About This Threat
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-warning">🎯 Attack Type</h6>
+                            <p class="text-light">{{ prediction }}</p>
+                            <small class="text-muted">This is the type of security threat we found</small>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-warning">🚨 Risk Level</h6>
+                            <p class="text-light">
+                                {% if confidence >= 90 %}
+                                    <span class="badge bg-danger">🔴 High Risk</span>
+                                {% elif confidence >= 75 %}
+                                    <span class="badge bg-warning">🟡 Medium Risk</span>
+                                {% else %}
+                                    <span class="badge bg-info">🔵 Low Risk</span>
+                                {% endif %}
+                            </p>
+                            <small class="text-muted">How dangerous this threat could be</small>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6 class="text-warning">🛠️ What We Can Do</h6>
+                            <ul class="text-light">
+                                <li>🔒 Automatically block harmful traffic</li>
+                                <li>📋 Create detailed security report</li>
+                                <li>⚡ Apply instant protection rules</li>
+                                <li>📊 Monitor your network continuously</li>
+                            </ul>
+                            <p class="text-info mt-3">
+                                <i class="fas fa-lightbulb me-2"></i>
+                                <strong>Good news!</strong> Click "Resolve This Threat Now" above and our system will automatically fix this for you.
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
+    </div>
+    {% endif %}
+
+    <!-- Quick Actions for Normal Traffic -->
+    {% if prediction == 'Normal' %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card bg-success bg-opacity-25 border-success">
+                <div class="card-body text-center">
+                    <h5 class="text-success mb-3">
+                        <i class="fas fa-thumbs-up me-2"></i>
+                        Great Job! Your Network is Protected
+                    </h5>
+                    <p class="text-light mb-4">
+                        Regular scanning helps keep your healthcare data safe. Here's what you can do next:
+                    </p>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <div class="d-grid">
+                                <a href="{{ url_for('predict') }}" class="btn btn-outline-success">
+                                    <i class="fas fa-search me-2"></i>
+                                    Scan Again
+                                </a>
+                            </div>
+                            <small class="text-muted">Run another security scan</small>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <div class="d-grid">
+                                <a href="{{ url_for('analytics') }}" class="btn btn-outline-info">
+                                    <i class="fas fa-chart-bar me-2"></i>
+                                    View Analytics
+                                </a>
+                            </div>
+                            <small class="text-muted">See security trends</small>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <div class="d-grid">
+                                <a href="{{ url_for('dashboard') }}" class="btn btn-outline-primary">
+                                    <i class="fas fa-home me-2"></i>
+                                    Dashboard
+                                </a>
+                            </div>
+                            <small class="text-muted">Back to main menu</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
     </div>
     
     <!-- Threat Information -->
@@ -422,34 +530,218 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Action functions
+    <!-- User Guide Section -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card bg-primary bg-opacity-10 border-primary">
+                <div class="card-header bg-primary">
+                    <h4 class="card-title mb-0 text-white">
+                        <i class="fas fa-question-circle me-2"></i>
+                        📖 How to Use This Page - User Guide
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-lg-6">
+                            <h6 class="text-primary fw-bold">🎯 Understanding Your Results</h6>
+                            <ul class="list-unstyled text-dark">
+                                <li class="mb-2">
+                                    <i class="fas fa-check-circle text-success me-2"></i>
+                                    <strong>Green = Safe:</strong> Your network is secure
+                                </li>
+                                <li class="mb-2">
+                                    <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                                    <strong>Yellow/Red = Threat:</strong> Security issue found
+                                </li>
+                                <li class="mb-2">
+                                    <i class="fas fa-percentage text-info me-2"></i>
+                                    <strong>Confidence %:</strong> How sure we are (90%+ = very sure)
+                                </li>
+                            </ul>
+                            
+                            <h6 class="text-primary fw-bold mt-4">🚨 If You See a Threat</h6>
+                            <ol class="text-dark">
+                                <li>Don't panic! Our system will help you</li>
+                                <li>Click the <span class="badge bg-warning">🔧 Resolve This Threat Now</span> button</li>
+                                <li>Let our automated system fix it for you</li>
+                                <li>Check the dashboard for updates</li>
+                            </ol>
+                        </div>
+                        
+                        <div class="col-lg-6">
+                            <h6 class="text-primary fw-bold">🔄 What to Do Next</h6>
+                            <div class="accordion" id="userGuideAccordion">
+                                <div class="accordion-item">
+                                    <h6 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#scanMore">
+                                            <i class="fas fa-search me-2"></i>Want to Scan More?
+                                        </button>
+                                    </h6>
+                                    <div id="scanMore" class="accordion-collapse collapse" data-bs-parent="#userGuideAccordion">
+                                        <div class="accordion-body">
+                                            Click <strong>"Scan Another Network"</strong> to analyze different network traffic. Regular scanning helps keep your healthcare data protected.
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="accordion-item">
+                                    <h6 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#learnMore">
+                                            <i class="fas fa-info-circle me-2"></i>Want More Details?
+                                        </button>
+                                    </h6>
+                                    <div id="learnMore" class="accordion-collapse collapse" data-bs-parent="#userGuideAccordion">
+                                        <div class="accordion-body">
+                                            Click <strong>"Learn More"</strong> to see what type of threat was found and what our system can do to protect you.
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="accordion-item">
+                                    <h6 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#needHelp">
+                                            <i class="fas fa-life-ring me-2"></i>Need Help?
+                                        </button>
+                                    </h6>
+                                    <div id="needHelp" class="accordion-collapse collapse" data-bs-parent="#userGuideAccordion">
+                                        <div class="accordion-body">
+                                            If you're confused, go back to the <strong>Dashboard</strong> for a simple overview, or use <strong>"Auto Response"</strong> to let the system handle everything automatically.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="alert alert-info mt-3">
+                                <i class="fas fa-lightbulb me-2"></i>
+                                <strong>💡 Tip:</strong> You don't need to be a tech expert! Our system is designed to protect your healthcare data automatically. Just follow the buttons and we'll take care of the rest.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showThreatInfo() {
+    const threatInfo = document.getElementById('threatInfo');
+    if (threatInfo.style.display === 'none') {
+        threatInfo.style.display = 'block';
+        threatInfo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+        // Add entrance animation
+        threatInfo.style.animation = 'slideInRight 0.6s ease-out';
+    } else {
+        // Add exit animation before hiding
+        threatInfo.style.animation = 'slideOutRight 0.4s ease-in';
+        setTimeout(() => {
+            threatInfo.style.display = 'none';
+        }, 400);
+    }
+}
+
+// Enhanced notification system
+function showNotification(message, type = 'info', duration = 4000) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 320px; animation: slideInRight 0.5s ease;';
+    
+    const icons = {
+        'success': 'check-circle',
+        'danger': 'exclamation-circle',
+        'warning': 'exclamation-triangle',
+        'info': 'info-circle'
+    };
+    
+    alertDiv.innerHTML = `
+        <i class="fas fa-${icons[type] || 'info-circle'} me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    setTimeout(() => {
+        alertDiv.style.animation = 'slideOutRight 0.4s ease';
+        setTimeout(() => alertDiv.remove(), 400);
+    }, duration);
+}
+
+// Page load animation with enhanced visuals
+document.addEventListener('DOMContentLoaded', function() {
+    // Add entrance animation to main result card
+    const resultCard = document.querySelector('.prediction-normal, .prediction-attack');
+    if (resultCard) {
+        resultCard.style.opacity = '0';
+        resultCard.style.transform = 'scale(0.95)';
+        setTimeout(() => {
+            resultCard.style.transition = 'all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)';
+            resultCard.style.opacity = '1';
+            resultCard.style.transform = 'scale(1)';
+        }, 100);
+    }
+});
+
+// Enhanced action functions with better feedback
 function generateReport() {
     const prediction = '{{ prediction }}';
     const confidence = '{{ confidence }}';
     
-    // Simulate report generation
     const btn = event.target;
     const originalHTML = btn.innerHTML;
-    btn.innerHTML = '<div class="loading me-2"></div>Generating...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
     btn.disabled = true;
     
     setTimeout(() => {
-        alert(`Security Report Generated!\n\nResult: ${prediction}\nConfidence: ${confidence}%\n\nReport downloaded successfully.`);
+        // Create report content
+        const reportContent = `
+===========================================
+SECURITY SCAN REPORT
+===========================================
+
+Scan Date: ${new Date().toLocaleString()}
+Result: ${prediction}
+Confidence Level: ${confidence}%
+
+ANALYSIS SUMMARY:
+${prediction === 'Normal' ? 
+  '✅ No threats detected. Network traffic is normal and secure.' :
+  `⚠️ THREAT DETECTED: ${prediction}\n\nRECOMMENDATION: Use the "Resolve This Threat Now" button\nto automatically fix this security issue.`
+}
+
+===========================================
+Generated by Healthcare Cybersecurity ML System
+===========================================
+        `;
+        
+        // Download report
+        const blob = new Blob([reportContent], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Security_Scan_Report_${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        showNotification('✅ Report downloaded successfully!', 'success');
         btn.innerHTML = originalHTML;
         btn.disabled = false;
-    }, 2000);
+    }, 1500);
 }
 
 function alertTeam() {
-    alert('🚨 Security team has been notified!\n\nAlert sent to:\n- Security Operations Center\n- Network Administrators\n- Incident Response Team');
+    showNotification('🚨 Security team has been notified! Alert sent to SOC, Network Admins, and Incident Response Team.', 'warning', 5000);
 }
 
 function blockTraffic() {
-    alert('🛡️ Traffic blocking initiated!\n\nActions taken:\n- Source IP added to blacklist\n- Firewall rules updated\n- Traffic monitoring increased');
+    showNotification('🛡️ Traffic blocking initiated! Source IP blacklisted and firewall rules updated.', 'success', 5000);
 }
 
 function detailedAnalysis() {
-    alert('🔬 Deep analysis scheduled!\n\nAnalysis includes:\n- Packet-level inspection\n- Behavioral analysis\n- Historical pattern matching');
+    showNotification('🔬 Deep analysis scheduled! Includes packet inspection, behavioral analysis, and pattern matching.', 'info', 5000);
 }
 
 function scheduleMonitoring() {

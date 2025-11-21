@@ -181,6 +181,68 @@
                                     <option value="0">No</option>
                                     <option value="1">Yes</option>
                                 </select>
+                                <small class="form-text text-muted">User successfully logged in</small>
+                            </div>
+
+                            <!-- Healthcare-Specific Features -->
+                            <div class="col-12 mb-4 mt-4">
+                                <h6 class="fw-bold text-danger border-bottom pb-2">
+                                    <i class="fas fa-hospital me-2"></i>Healthcare-Specific Features
+                                </h6>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="device_type" class="form-label">
+                                    <i class="fas fa-microchip me-1"></i>Device Type
+                                </label>
+                                <select class="form-control" name="device_type" id="device_type">
+                                    <option value="0">ECG</option>
+                                    <option value="1">MRI</option>
+                                    <option value="2">X-Ray</option>
+                                    <option value="3">Ventilator</option>
+                                    <option value="4">Infusion Pump</option>
+                                </select>
+                                <small class="form-text text-muted">Type of medical device</small>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="protocol" class="form-label">
+                                    <i class="fas fa-random me-1"></i>Healthcare Protocol
+                                </label>
+                                <select class="form-control" name="protocol" id="protocol">
+                                    <option value="0">HL7</option>
+                                    <option value="1">DICOM</option>
+                                    <option value="2">FHIR</option>
+                                    <option value="3">IHE</option>
+                                </select>
+                                <small class="form-text text-muted">Healthcare communication protocol</small>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="user_role" class="form-label">
+                                    <i class="fas fa-user-md me-1"></i>User Role
+                                </label>
+                                <select class="form-control" name="user_role" id="user_role">
+                                    <option value="0">Doctor</option>
+                                    <option value="1">Nurse</option>
+                                    <option value="2">Admin</option>
+                                    <option value="3">Technician</option>
+                                </select>
+                                <small class="form-text text-muted">Role of the user accessing the system</small>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="department" class="form-label">
+                                    <i class="fas fa-building me-1"></i>Department
+                                </label>
+                                <select class="form-control" name="department" id="department">
+                                    <option value="0">Cardiology</option>
+                                    <option value="1">Radiology</option>
+                                    <option value="2">ICU</option>
+                                    <option value="3">General</option>
+                                </select>
+                                <small class="form-text text-muted">Hospital department</small>
+                            </div>
                             </div>
                             
                             <!-- Quick Preset Buttons -->
@@ -201,7 +263,13 @@
                                     <button type="button" class="btn btn-outline-info me-2 mb-2" onclick="loadPreset('random')">
                                         <i class="fas fa-random me-1"></i>Random Values
                                     </button>
+                                    <button type="button" class="btn btn-outline-primary me-2 mb-2" onclick="loadTestThreat()">
+                                        <i class="fas fa-vial me-1"></i>🧪 Test Threat
+                                    </button>
                                 </div>
+                                <small class="text-muted">
+                                    Use <strong>"Test Threat"</strong> to guarantee a threat detection for testing the resolution workflow.
+                                </small>
                             </div>
                         </div>
                         
@@ -214,11 +282,20 @@
                         {% endif %}
                         
                         <div class="text-center mt-4">
-                            <button type="submit" class="btn btn-primary btn-lg px-5" id="analyzeBtn">
-                                <i class="fas fa-search me-2"></i>
-                                <span id="analyzeText">Analyze Threat</span>
-                                <div class="loading d-none" id="analyzeLoading"></div>
+                            <button type="submit" class="btn btn-primary btn-lg px-5 pulse-animation" id="analyzeBtn">
+                                <i class="fas fa-search me-2" id="analyzeIcon"></i>
+                                <span id="analyzeText">🔍 Analyze Network Traffic</span>
+                                <span id="analyzeLoading" class="d-none">
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                    🧠 AI Analyzing... Please wait
+                                </span>
                             </button>
+                            <div class="mt-3">
+                                <small class="text-muted">
+                                    <i class="fas fa-lightbulb text-warning me-1"></i>
+                                    💡 Tip: Use "Test Threat" button above for guaranteed threat detection
+                                </small>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -388,6 +465,33 @@ function loadPreset(type) {
     setTimeout(() => {
         form.style.transform = 'scale(1)';
     }, 100);
+}
+
+// Special test function to guarantee a threat detection
+function loadTestThreat() {
+    // Load values that typically result in threat detection
+    document.getElementById('duration').value = 0;
+    document.getElementById('protocol_type').value = 1;
+    document.getElementById('service').value = 3;
+    document.getElementById('flag').value = 3; // REJ flag often indicates attack
+    document.getElementById('src_bytes').value = 0;
+    document.getElementById('dst_bytes').value = 0;
+    document.getElementById('land').value = 1; // Land attack indicator
+    document.getElementById('wrong_fragment').value = 3;
+    document.getElementById('urgent').value = 0;
+    document.getElementById('hot').value = 20; // High hot value
+    document.getElementById('num_failed_logins').value = 5; // Failed logins
+    document.getElementById('logged_in').value = 0;
+    
+    // Show notification
+    alert('🧪 Test threat data loaded! This should detect a threat for testing the resolution workflow.');
+    
+    // Add visual feedback
+    const form = document.getElementById('predictionForm');
+    form.style.backgroundColor = 'rgba(220, 53, 69, 0.1)';
+    setTimeout(() => {
+        form.style.backgroundColor = '';
+    }, 1000);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
