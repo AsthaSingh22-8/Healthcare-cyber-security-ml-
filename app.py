@@ -1,4 +1,4 @@
-# Mapping for attack types
+ # Mapping for attack types
 ATTACK_TYPES = {
     0: 'Normal',
     1: 'DoS Attack',
