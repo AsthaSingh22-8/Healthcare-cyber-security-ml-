@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Threat Log - Healthcare Cybersecurity{% endblock %}
+{% block content %}
+<div class="container-fluid fade-in">
+  <div class="row mb-4">
+    <div class="col-12">
+      <h1 class="display-6 fw-bold text-white">
+        <i class="fas fa-shield-virus me-2"></i>Threat Response Log
+      </h1>
+      <p class="text-white-50 mb-0">Historical automated response evaluations (simulation only).</p>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-12">
+      <div class="card card-atr mb-4">
+        <div class="card-header" style="background:transparent; border-bottom:1px solid rgba(255,255,255,0.08);">
+          <h5 class="mb-0 text-white"><i class="fas fa-list me-2"></i>Recent Entries</h5>
+        </div>
+        <div class="card-body">
+          {% if threats and threats|length > 0 %}
+          <div class="table-responsive">
+            <table class="table table-threats table-sm table-borderless align-middle">
+              <thead style="background:rgba(255,255,255,0.07);">
+                <tr class="text-nowrap">
+                  <th class="text-white-50">Timestamp</th>
+                  <th class="text-white-50">Threat</th>
+                  <th class="text-white-50">Confidence</th>
+                  <th class="text-white-50">Action</th>
+                  <th class="text-white-50">Source IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for t in threats %}
+                <tr>
+                  <td><small class="text-white-50">{{ t.timestamp }}</small></td>
+                  <td>
+                    <span class="badge {% if 'Normal' in t.threat_type %}bg-success{% else %}badge-critical{% endif %}">{{ t.threat_type }}</span>
+                  </td>
+                  <td style="min-width:120px;">
+                    <div class="confidence-mini mb-1" data-value="{{ '%.1f'|format(t.confidence) }}" role="progressbar" aria-valuenow="{{ '%.1f'|format(t.confidence) }}" aria-valuemin="0" aria-valuemax="100">
+                      <span class="bar-fill"></span>
+                    </div>
+                    <small class="text-white">{{ '%.1f'|format(t.confidence) }}%</small>
+                  </td>
+                  <td><span class="badge badge-action">{{ t.action }}</span></td>
+                  <td><small class="text-white-50">{{ t.source_ip }}</small></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <small class="text-white-50">Showing {{ threats|length }} entries (max 50). Actions are simulations.</small>
+          {% else %}
+          <div class="text-center py-5">
+            <i class="fas fa-shield-alt text-white-50 mb-3" style="font-size:3rem;"></i>
+            <h5 class="text-white">No threat responses recorded</h5>
+            <p class="text-white-50">Run a prediction that yields a non-normal classification to populate the log.</p>
+            <a href="{{ url_for('predict') }}" class="btn btn-outline-light">
+              <i class="fas fa-play me-1"></i>Generate Threat Scenario
+            </a>
+          </div>
+          {% endif %}
+        </div>
+        <div class="card-footer text-white-50 small" style="background:rgba(255,255,255,0.04);">
+          <i class="fas fa-info-circle me-1"></i> Confidence threshold: {{ threat_engine.confidence_threshold if threat_engine else 95 }}%.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+// Confidence bar width assignment
+(document.querySelectorAll('.confidence-mini')||[]).forEach(function(el){
+  var v = parseFloat(el.getAttribute('data-value'));
+  if(!isNaN(v)){
+    var fill = el.querySelector('.bar-fill');
+    if(fill){ fill.style.width = v + '%'; }
+  }
+});
+</script>
+{% endblock %}

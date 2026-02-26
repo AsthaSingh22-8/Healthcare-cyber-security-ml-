@@ -1,4 +1,18 @@
- # Mapping for attack types
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+import pandas as pd
+import numpy as np
+import joblib
+import sqlite3
+from datetime import datetime
+import os
+from werkzeug.security import generate_password_hash, check_password_hash
+import threading
+import time
+from live_packet_features import LivePacketFeatureExtractor, FEATURE_NAMES
+from app.security.threat_response import threat_engine
+from app.security.advanced_atr import enhanced_atr_engine
+
+# Attack types mapping - using threat engine constants
 ATTACK_TYPES = {
     0: 'Normal',
     1: 'DoS Attack',
@@ -6,63 +20,23 @@ ATTACK_TYPES = {
     3: 'R2L Attack',
     4: 'U2R Attack'
 }
-
-from flask import Flask, render_template, request, redirect, url_for, flash, session
-import pandas as pd
 import numpy as np
 import joblib
 import sqlite3
-import hashlib
 from datetime import datetime
 import os
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_socketio import SocketIO, emit
 import threading
 import time
-import asyncio
 from live_packet_features import LivePacketFeatureExtractor, FEATURE_NAMES
+from app.security.threat_response import threat_engine
+from app.security.advanced_atr import enhanced_atr_engine
 
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'
-socketio = SocketIO(app)
-
-# Live prediction background thread
-def live_prediction_stream():
-    # Fix for PyShark asyncio error in threads
-    asyncio.set_event_loop(asyncio.new_event_loop())
-    extractor = LivePacketFeatureExtractor(interface='Wi-Fi')
-    try:
-        model = joblib.load('model.sav')
-        label_encoders = joblib.load('label_encoders.sav')
-    except Exception:
-        model = None
-        label_encoders = {}
-    while True:
-        features_list = extractor.capture_and_extract(packet_limit=1)
-        for features_dict in features_list:
-            processed_features = []
-            for name in FEATURE_NAMES:
-                value = features_dict[name]
-                if name in label_encoders:
-                    try:
-                        value = label_encoders[name].transform([value])[0]
-                    except Exception:
-                        value = 0
-                processed_features.append(float(value))
-            features = np.array(processed_features).reshape(1, -1)
-            if model:
-                prediction = model.predict(features)[0]
-                label = ATTACK_TYPES.get(int(prediction), str(prediction))
-                socketio.emit('live_prediction', {
-                    'prediction': label,
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                })
-        time.sleep(5)  # Adjust interval as needed
-
-# Start background thread for live predictions immediately after SocketIO init
-start_live_thread = threading.Thread(target=live_prediction_stream, daemon=True)
-start_live_thread.start()
+# Security: Use consistent secret key to prevent session issues
+app.secret_key = 'healthcare-cybersecurity-ml-secure-key-2024'
+app.permanent_session_lifetime = 3600  # 1 hour
 
 # Database setup
 def init_db():
@@ -92,10 +66,42 @@ def init_db():
     c.execute('''CREATE INDEX IF NOT EXISTS idx_predictions_result 
                  ON predictions(prediction_result)''')
     
+    # Create demo users for testing
+    from werkzeug.security import generate_password_hash
+    
+    # Check if demo users already exist
+    c.execute("SELECT COUNT(*) FROM users WHERE username IN ('admin', 'demo')")
+    existing_demo_users = c.fetchone()[0]
+    
+    if existing_demo_users == 0:
+        # Create demo admin user
+        admin_password = generate_password_hash('admin123')
+        c.execute("INSERT OR IGNORE INTO users (username, email, password) VALUES (?, ?, ?)",
+                 ('admin', 'admin@demo.com', admin_password))
+        
+        # Create demo user
+        demo_password = generate_password_hash('demo123')
+        c.execute("INSERT OR IGNORE INTO users (username, email, password) VALUES (?, ?, ?)",
+                 ('demo', 'demo@demo.com', demo_password))
+        
+        print("Demo users created: admin/admin123 and demo/demo123")
+    
     conn.commit()
     conn.close()
 
 # Load the trained model and preprocessing components
+model = None
+feature_names = None
+scaler = None
+label_encoders = None
+
+# Helper function for session validation
+def requires_login():
+    """Check if user is properly logged in"""
+    return ('user_id' in session and 
+            'username' in session and 
+            session.get('logged_in', False) == True)
+
 try:
     model = joblib.load('model.sav')
     print("Model loaded successfully!")
@@ -121,16 +127,32 @@ try:
             'dst_host_diff_srv_rate', 'dst_host_same_src_port_rate',
             'dst_host_srv_diff_host_rate', 'dst_host_serror_rate',
             'dst_host_srv_serror_rate', 'dst_host_rerror_rate',
-            'dst_host_srv_rerror_rate',
-            'device_type', 'protocol', 'user_role', 'department'
+            'dst_host_srv_rerror_rate'
         ]
         
-except FileNotFoundError:
+    try:
+        scaler = joblib.load('scaler.sav')
+        print("Scaler loaded successfully!")
+    except FileNotFoundError:
+        print("Warning: scaler.sav not found. Will skip scaling.")
+        scaler = None
+        
+    try:
+        label_encoders = joblib.load('label_encoders.sav')
+        print("Label encoders loaded successfully!")
+    except FileNotFoundError:
+        print("Warning: label_encoders.sav not found. Will use default encoding.")
+        label_encoders = None
+        
+except Exception as e:
+    print(f"Error loading model: {e}")
     model = None
     feature_names = []
-    print("Warning: Model file not found. Please train the model first.")
+    scaler = None
+    label_encoders = None
 
-attack_types = {
+# Attack types mapping - using threat engine constants
+ATTACK_TYPES = {
     0: 'Normal',
     1: 'DoS Attack',
     2: 'Probe Attack',
@@ -173,22 +195,44 @@ def register():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
         
-        conn = sqlite3.connect('users.db')
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE username = ?", (username,))
-        user = c.fetchone()
-        conn.close()
+        # Input validation
+        if not username or not password:
+            flash('Username and password are required!', 'error')
+            return render_template('login.html')
         
-        if user and check_password_hash(user[3], password):
-            session['user_id'] = user[0]
-            session['username'] = user[1]
-            flash('Login successful!', 'success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Invalid username or password!', 'error')
+        try:
+            conn = sqlite3.connect('users.db', timeout=10)
+            c = conn.cursor()
+            c.execute("SELECT * FROM users WHERE username = ?", (username,))
+            user = c.fetchone()
+            
+            if user and check_password_hash(user[3], password):
+                # Clear any existing session data
+                session.clear()
+                # Set new session data
+                session['user_id'] = user[0]
+                session['username'] = user[1]
+                session['logged_in'] = True
+                session.permanent = True
+                
+                flash('Login successful!', 'success')
+                
+                # Check if user was trying to access a specific page
+                next_page = request.args.get('next')
+                if next_page:
+                    return redirect(next_page)
+                return redirect(url_for('dashboard'))
+            else:
+                flash('Invalid username or password!', 'error')
+        except sqlite3.Error as e:
+            print(f"Database error in login: {e}")
+            flash('An error occurred. Please try again.', 'error')
+        finally:
+            if 'conn' in locals():
+                conn.close()
     
     return render_template('login.html')
 
@@ -200,201 +244,367 @@ def logout():
 
 @app.route('/dashboard')
 def dashboard():
-    if 'user_id' not in session:
+    if not requires_login():
         flash('Please login to access the dashboard.', 'warning')
         return redirect(url_for('login'))
     
-    # Get user's prediction history
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("""SELECT prediction_result, confidence, prediction_date 
-                 FROM predictions WHERE user_id = ? 
-                 ORDER BY prediction_date DESC LIMIT 10""", (session['user_id'],))
-    recent_predictions = c.fetchall()
-    conn.close()
-    
-    return render_template('dashboard.html', predictions=recent_predictions)
+    # Get user's prediction history with proper connection management
+    try:
+        conn = sqlite3.connect('users.db', timeout=10)
+        c = conn.cursor()
+        c.execute("""SELECT prediction_result, confidence, prediction_date 
+                     FROM predictions WHERE user_id = ? 
+                     ORDER BY prediction_date DESC LIMIT 10""", (session['user_id'],))
+        recent_predictions = c.fetchall()
+        
+        return render_template('dashboard.html', 
+                             predictions=recent_predictions,
+                             username=session.get('username', 'User'))
+    except sqlite3.Error as e:
+        print(f"Database error in dashboard: {e}")
+        flash('Error loading dashboard. Please try again.', 'error')
+        return render_template('dashboard.html', predictions=[], username=session.get('username', 'User'))
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
 @app.route('/predict', methods=['GET', 'POST'])
 def predict():
-    if 'user_id' not in session:
+    if not requires_login():
         flash('Please login to make predictions.', 'warning')
-        return redirect(url_for('login'))
+        return redirect(url_for('login', next=request.url))
     
     if request.method == 'POST':
         try:
-            # Ensure we have the correct feature names and model
+            # Validate model availability
             if model is None:
                 flash('Model not available. Please train the model first.', 'error')
-                return render_template('predict.html', feature_names=feature_names)
+                return render_template('predict.html', feature_names=feature_names or [], threat_engine=threat_engine)
             
             if not feature_names:
                 flash('Feature names not available. Please check model files.', 'error')
-                return render_template('predict.html', feature_names=[])
+                return render_template('predict.html', feature_names=[], threat_engine=threat_engine)
             
-            # Collect input features using the correct feature names
+            # Collect and process input features
             features = []
             feature_dict = {}
+            expected_count = getattr(model, 'n_features_in_', len(feature_names))
+            effective_feature_names = feature_names[:expected_count] if len(feature_names) > expected_count else feature_names
             
-            print(f"Model expects {len(feature_names)} features")
-            print(f"Feature names: {feature_names}")
-            
-            # Load preprocessing components if they exist
-            try:
-                scaler = joblib.load('scaler.sav')
-                print("Scaler loaded successfully")
-            except FileNotFoundError:
-                scaler = None
-                print("Warning: Scaler not found, using raw values")
-            
-            try:
-                label_encoders = joblib.load('label_encoders.sav')
-                print("Label encoders loaded successfully")
-            except FileNotFoundError:
-                label_encoders = {}
-                print("Warning: Label encoders not found")
-            
-            # Process each feature according to the trained model
-            for feature_name in feature_names:
+            # Process each feature
+            for feature_name in effective_feature_names:
                 value = request.form.get(feature_name, 0)
                 
-                # Handle categorical features with label encoding if available
-                if feature_name in label_encoders and isinstance(value, str):
+                # Handle categorical features with label encoding
+                if label_encoders and feature_name in label_encoders and isinstance(value, str):
                     try:
                         encoded_value = label_encoders[feature_name].transform([value])[0]
                         features.append(float(encoded_value))
                     except (ValueError, KeyError):
-                        # If encoding fails, use 0 as default
                         features.append(0.0)
                 else:
-                    # Handle numeric features
+                    # Handle numeric features with validation
                     try:
-                        numeric_value = float(value)
+                        numeric_value = max(0.0, min(float(value), 1e10))  # Clamp values
                         features.append(numeric_value)
                     except ValueError:
                         features.append(0.0)
                 
                 feature_dict[feature_name] = features[-1]
             
-            print(f"Processed {len(features)} features")
-            print(f"First 5 features: {features[:5]}")
+            # Pad with zeros if needed
+            if len(features) < expected_count:
+                pad_len = expected_count - len(features)
+                features.extend([0.0] * pad_len)
             
-            # Convert to numpy array and reshape
-            features_array = np.array(features).reshape(1, -1)
+            # Convert to numpy array and validate dimensions
+            features_array = np.array(features, dtype=float).reshape(1, -1)
+            if features_array.shape[1] != expected_count:
+                raise ValueError(f"Feature vector width {features_array.shape[1]} != expected {expected_count}")
             
-            # Apply scaling if scaler is available
+            # Apply scaling if available
             if scaler is not None:
                 features_array = scaler.transform(features_array)
-                print("Features scaled successfully")
             
-            # Make prediction
+            # Make prediction and get confidence
             prediction = model.predict(features_array)[0]
-            
-            # Get confidence score
             try:
                 probabilities = model.predict_proba(features_array)[0]
                 confidence = max(probabilities) * 100
             except AttributeError:
-                # If model doesn't support predict_proba, use default confidence
                 confidence = 95.0
             
-            result = attack_types.get(prediction, 'Unknown')
+            result = ATTACK_TYPES.get(prediction, 'Unknown')
             
-            print(f"Prediction: {result}, Confidence: {confidence:.2f}%")
+            # Save to database with proper error handling
+            try:
+                conn = sqlite3.connect('users.db', timeout=10)
+                c = conn.cursor()
+                c.execute("""INSERT INTO predictions 
+                             (user_id, prediction_result, confidence, input_features) 
+                             VALUES (?, ?, ?, ?)""",
+                         (session['user_id'], result, confidence, str(feature_dict)))
+                conn.commit()
+            except sqlite3.Error as e:
+                print(f"Database error saving prediction: {e}")
+            finally:
+                if 'conn' in locals():
+                    conn.close()
             
-            # Save prediction to database
-            conn = sqlite3.connect('users.db')
-            c = conn.cursor()
-            c.execute("""INSERT INTO predictions 
-                         (user_id, prediction_result, confidence, input_features) 
-                         VALUES (?, ?, ?, ?)""",
-                     (session['user_id'], result, confidence, str(feature_dict)))
-            conn.commit()
-            conn.close()
+            # Simple threat response logging
+            try:
+                atr_record = threat_engine.respond(result, confidence, source_ip='unknown', features=feature_dict)
+            except Exception:
+                atr_record = {'action': 'logged', 'reason': 'Basic logging'}
+            
+            # Enhanced ATR for high confidence threats
+            if confidence > 80.0:
+                try:
+                    threat_context = enhanced_atr_engine.analyze_threat(
+                        threat_type=result,
+                        confidence=confidence,
+                        source_ip=request.remote_addr or 'unknown',
+                        features=feature_dict
+                    )
+                    enhanced_atr_engine.respond_to_threat(threat_context)
+                except Exception as atr_error:
+                    print(f"Enhanced ATR error: {atr_error}")
             
             return render_template('result.html', 
                                  prediction=result, 
                                  confidence=round(confidence, 2),
-                                 features=feature_dict)
+                                 features=feature_dict,
+                                 atr=atr_record)
         
         except Exception as e:
-            print(f"Detailed error: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"Prediction error: {str(e)}")
             flash(f'Error making prediction: {str(e)}', 'error')
-            return render_template('predict.html', feature_names=feature_names)
+            return render_template('predict.html', feature_names=feature_names or [])
     
-    return render_template('predict.html', feature_names=feature_names)
+    return render_template('predict.html', feature_names=feature_names or [])
 
 @app.route('/about')
 def about():
-    return render_template('about.html')
+    return render_template('about_enhanced.html')
+
+# Error handlers for better user experience
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('base.html'), 404
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return render_template('base.html'), 500
 
 @app.route('/analytics')
 def analytics():
-    if 'user_id' not in session:
+    if not requires_login():
         flash('Please login to view analytics.', 'warning')
-        return redirect(url_for('login'))
+        return redirect(url_for('login', next=request.url))
     
-    # Optimized analytics data retrieval with connection management
+    # Optimized analytics with single connection
+    conn = None
     try:
-        conn = sqlite3.connect('users.db', timeout=10)  # Add timeout
-        conn.row_factory = sqlite3.Row  # Enable column access by name
+        conn = sqlite3.connect('users.db', timeout=10)
+        conn.row_factory = sqlite3.Row
         c = conn.cursor()
         
         user_id = session['user_id']
         
-        # Optimized single query to get both prediction counts and recent activity
-        # Get prediction counts by type with better performance
+        # Single query for prediction counts
         c.execute("""SELECT prediction_result, COUNT(*) as count 
                      FROM predictions 
                      WHERE user_id = ? 
                      GROUP BY prediction_result 
                      ORDER BY count DESC""", (user_id,))
-        prediction_counts = c.fetchall()
+        prediction_counts = [(row[0], row[1]) for row in c.fetchall()]
         
-        # Get recent activity with limit and better indexing
+        # Single query for recent activity
         c.execute("""SELECT prediction_result, confidence, prediction_date 
                      FROM predictions 
                      WHERE user_id = ? 
                      ORDER BY prediction_date DESC 
-                     LIMIT 15""", (user_id,))  # Reduced from 20 to 15 for better performance
-        recent_activity = c.fetchall()
+                     LIMIT 15""", (user_id,))
+        recent_activity = [(row[0], row[1], row[2]) for row in c.fetchall()]
         
-        # Convert to simple tuples for JSON serialization
-        prediction_counts = [(row[0], row[1]) for row in prediction_counts]
-        recent_activity = [(row[0], row[1], row[2]) for row in recent_activity]
+        # Calculate analytics summary
+        total_predictions = sum(count for _, count in prediction_counts)
+        threat_count = sum(count for pred_type, count in prediction_counts if pred_type != 'Normal')
+        normal_count = sum(count for pred_type, count in prediction_counts if pred_type == 'Normal')
         
-        # Pre-calculate analytics data on server side to reduce client-side processing
         analytics_summary = {
-            'total_predictions': sum(count for _, count in prediction_counts),
-            'threat_count': sum(count for pred_type, count in prediction_counts if pred_type != 'Normal'),
-            'normal_count': sum(count for pred_type, count in prediction_counts if pred_type == 'Normal'),
+            'total_predictions': total_predictions,
+            'threat_count': threat_count,
+            'normal_count': normal_count,
             'avg_confidence': round(sum(conf for _, conf, _ in recent_activity) / len(recent_activity), 1) if recent_activity else 0,
             'max_confidence': max((conf for _, conf, _ in recent_activity), default=0),
             'min_confidence': min((conf for _, conf, _ in recent_activity), default=0)
         }
         
-        conn.close()
-        
         return render_template('analytics.html', 
                              prediction_counts=prediction_counts,
                              recent_activity=recent_activity,
-                             analytics_summary=analytics_summary)
+                             analytics_summary=analytics_summary,
+                             username=session.get('username', 'User'))
                              
     except sqlite3.Error as e:
         print(f"Database error in analytics: {e}")
-        if 'conn' in locals():
-            conn.close()
         flash('Error loading analytics data. Please try again.', 'error')
         return redirect(url_for('dashboard'))
     except Exception as e:
         print(f"General error in analytics: {e}")
-        if 'conn' in locals():
-            conn.close()
         flash('An unexpected error occurred.', 'error')
         return redirect(url_for('dashboard'))
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/atr-dashboard')
+def atr_dashboard():
+    """Advanced Threat Response Dashboard"""
+    if not requires_login():
+        flash('Please login to access Auto Response dashboard.', 'warning')
+        return redirect(url_for('login', next=request.url))
+    
+    try:
+        dashboard_data = enhanced_atr_engine.get_dashboard_data()
+        return render_template('atr_dashboard.html', dashboard_data=dashboard_data)
+    except Exception as e:
+        print(f"ATR Dashboard error: {e}")
+        flash('Error loading ATR dashboard.', 'error')
+        return render_template('atr_dashboard.html', dashboard_data={})
+
+@app.route('/api/atr/dashboard-data')
+def get_atr_dashboard_data():
+    """API endpoint for real-time dashboard data"""
+    if not requires_login():
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    try:
+        data = enhanced_atr_engine.get_dashboard_data()
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/live-threats')
+def api_live_threats():
+    """Real-time threat detection endpoint - returns latest threats"""
+    if not requires_login():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        user_id = session.get('user_id')
+        
+        # Get threats from last 5 minutes
+        c.execute('''SELECT prediction_result, confidence, 
+                            prediction_date, id
+                     FROM predictions 
+                     WHERE user_id = ? 
+                     AND prediction_result != 'Normal'
+                     AND datetime(prediction_date) >= datetime('now', '-5 minutes')
+                     ORDER BY prediction_date DESC 
+                     LIMIT 5''', (user_id,))
+        live_threats = c.fetchall()
+        
+        # Get latest prediction (for live stream)
+        c.execute('''SELECT prediction_result, confidence, prediction_date
+                     FROM predictions 
+                     WHERE user_id = ? 
+                     ORDER BY prediction_date DESC 
+                     LIMIT 1''', (user_id,))
+        latest = c.fetchone()
+        
+        conn.close()
+        
+        response_data = {
+            'live_threats': [{
+                'prediction': threat[0],
+                'confidence': threat[1],
+                'timestamp': threat[2],
+                'id': threat[3]
+            } for threat in live_threats],
+            'latest_prediction': {
+                'prediction': latest[0] if latest else 'No data',
+                'confidence': latest[1] if latest else 0,
+                'timestamp': latest[2] if latest else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            } if latest else None,
+            'server_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        return jsonify(response_data)
+    except Exception as e:
+        print(f"Live threats API error: {str(e)}")
+        return jsonify({
+            'live_threats': [],
+            'latest_prediction': None,
+            'error': str(e)
+        }), 200  # Return 200 to avoid breaking frontend
+
+@app.route('/api/incident/<incident_id>')
+def get_incident_details(incident_id):
+    """API endpoint for incident details"""
+    if not requires_login():
+        return jsonify({'error': 'Authentication required'}), 401
+        
+    try:
+        details = enhanced_atr_engine.get_incident_details(incident_id)
+        if details:
+            return jsonify(details)
+        else:
+            return jsonify({'error': 'Incident not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     init_db()
+    # Start background thread for live packet capture and prediction
+    def live_prediction_background():
+        extractor = LivePacketFeatureExtractor(interface='Wi-Fi')
+        while True:
+            try:
+                features_list = extractor.capture_and_extract(packet_limit=1)
+                for features_dict in features_list:
+                    processed_features = []
+                    for name in FEATURE_NAMES:
+                        value = features_dict.get(name, 0)
+                        # Encode categorical features if encoder exists
+                        if label_encoders and name in label_encoders:
+                            try:
+                                value = label_encoders[name].transform([value])[0]
+                            except Exception:
+                                value = 0
+                        processed_features.append(float(value))
+                    features_array = np.array(processed_features).reshape(1, -1)
+                    # Apply scaling if available
+                    if scaler is not None:
+                        features_array = scaler.transform(features_array)
+                    # Make prediction and get confidence
+                    if model is not None:
+                        prediction = model.predict(features_array)[0]
+                        try:
+                            probabilities = model.predict_proba(features_array)[0]
+                            confidence = max(probabilities) * 100
+                        except Exception:
+                            confidence = 95.0
+                        result = ATTACK_TYPES.get(prediction, 'Unknown')
+                        # Insert into DB as 'system' user (user_id=1 for demo/admin)
+                        try:
+                            conn = sqlite3.connect('users.db', timeout=10)
+                            c = conn.cursor()
+                            c.execute("INSERT INTO predictions (user_id, prediction_result, confidence, input_features) VALUES (?, ?, ?, ?)",
+                                     (1, result, confidence, str(features_dict)))
+                            conn.commit()
+                        except Exception as e:
+                            print(f"Live prediction DB error: {e}")
+                        finally:
+                            if 'conn' in locals():
+                                conn.close()
+            except Exception as e:
+                print(f"Live prediction error: {e}")
+            time.sleep(5)  # Adjust interval as needed
+
+    live_thread = threading.Thread(target=live_prediction_background, daemon=True)
+    live_thread.start()
     app.run(debug=True)
